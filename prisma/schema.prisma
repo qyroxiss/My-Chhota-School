@@ -1,0 +1,57 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model School {
+  id        String     @id @default(cuid())
+  name      String
+  address   String?
+  logo      String?
+  createdAt DateTime   @default(now())
+  users     User[]
+  templates Template[]
+  papers    Paper[]
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String
+  role      String   @default("TEACHER")
+  schoolId  String
+  school    School   @relation(fields: [schoolId], references: [id])
+  createdAt DateTime @default(now())
+  papers    Paper[]
+}
+
+model Template {
+  id        String   @id @default(cuid())
+  name      String
+  class     String
+  subject   String
+  maxMarks  Int
+  duration  String?
+  schoolId  String
+  school    School   @relation(fields: [schoolId], references: [id])
+  structure String
+  createdAt DateTime @default(now())
+  papers    Paper[]
+}
+
+model Paper {
+  id          String   @id @default(cuid())
+  templateId  String
+  template    Template @relation(fields: [templateId], references: [id])
+  schoolId    String
+  school      School   @relation(fields: [schoolId], references: [id])
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  date        String?
+  content     String
+  createdAt   DateTime @default(now())
+}
