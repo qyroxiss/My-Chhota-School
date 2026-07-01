@@ -1,6 +1,5 @@
 'use server'
 import mammoth from 'mammoth'
-import pdfParse from 'pdf-parse'
 
 export async function extractTextFromFile(
   formData: FormData
@@ -16,6 +15,8 @@ export async function extractTextFromFile(
   try {
     // PDF
     if (type === 'application/pdf' || name.endsWith('.pdf')) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const pdfParse = require('pdf-parse')
       const data = await pdfParse(buffer)
       if (!data.text.trim())
         return { error: 'No readable text found in this PDF. If it is a scanned PDF, upload it as an image instead.' }
