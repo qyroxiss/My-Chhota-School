@@ -1,53 +1,74 @@
 import 'server-only'
 import { cache } from 'react'
-import { prisma } from './prisma'
+import { supabase } from './supabase'
 import { verifySession } from './session'
 
 export const getUser = cache(async () => {
   const session = await verifySession()
-  return prisma.user.findUnique({
-    where: { id: session.userId },
-    select: { id: true, name: true, email: true, role: true, schoolId: true, school: { select: { id: true, name: true, address: true, logo: true } } },
-  })
+  const { data } = await supabase
+    .from('User')
+    .select('id, name, email, role, schoolId, School(id, name, address, logo)')
+    .eq('id', session.userId)
+    .single()
+  if (!data) return null
+  const { School, ...rest } = data as any
+  return { ...rest, school: School }
 })
 
 export const getTemplates = cache(async () => {
   const session = await verifySession()
-  return prisma.template.findMany({
-    where: { schoolId: session.schoolId },
-    orderBy: { createdAt: 'desc' },
-  })
+  const { data } = await supabase
+    .from('Template')
+    .select('*')
+    .eq('schoolId', session.schoolId)
+    .order('createdAt', { ascending: false })
+  return data ?? []
 })
 
 export const getTemplate = cache(async (id: string) => {
   const session = await verifySession()
-  return prisma.template.findFirst({
-    where: { id, schoolId: session.schoolId },
-  })
+  const { data } = await supabase
+    .from('Template')
+    .select('*')
+    .eq('id', id)
+    .eq('schoolId', session.schoolId)
+    .single()
+  return data
 })
 
 export const getPapers = cache(async () => {
   const session = await verifySession()
-  return prisma.paper.findMany({
-    where: { schoolId: session.schoolId },
-    include: { template: true, createdBy: { select: { name: true } } },
-    orderBy: { createdAt: 'desc' },
-  })
+  const { data } = await supabase
+    .from('Paper')
+    .select('*, Template(name, class, subject, maxMarks, duration), User(name)')
+    .eq('schoolId', session.schoolId)
+    .order('createdAt', { ascending: false })
+  return (data ?? []).map((p: any) => ({
+    ...p,
+    template: p.Template,
+    createdBy: p.User ? { name: p.User.name } : null,
+  }))
 })
 
 export const getPaper = cache(async (id: string) => {
   const session = await verifySession()
-  return prisma.paper.findFirst({
-    where: { id, schoolId: session.schoolId },
-    include: { template: true, school: true },
-  })
+  const { data } = await supabase
+    .from('Paper')
+    .select('*, Template(*), School(*)')
+    .eq('id', id)
+    .eq('schoolId', session.schoolId)
+    .single()
+  if (!data) return null
+  const { Template, School, ...rest } = data as any
+  return { ...rest, template: Template, school: School }
 })
 
 export const getTeachers = cache(async () => {
   const session = await verifySession()
-  return prisma.user.findMany({
-    where: { schoolId: session.schoolId },
-    select: { id: true, name: true, email: true, role: true, createdAt: true },
-    orderBy: { createdAt: 'desc' },
-  })
+  const { data } = await supabase
+    .from('User')
+    .select('id, name, email, role, createdAt')
+    .eq('schoolId', session.schoolId)
+    .order('createdAt', { ascending: false })
+  return data ?? []
 })

@@ -1,7 +1,7 @@
 'use server'
 import { revalidatePath } from 'next/cache'
 import bcrypt from 'bcryptjs'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase'
 import { verifySession } from '@/lib/session'
 
 export async function addTeacher(state: { error?: string; success?: string } | undefined, formData: FormData) {
@@ -14,12 +14,17 @@ export async function addTeacher(state: { error?: string; success?: string } | u
 
   if (!name || !email || !password) return { error: 'All fields are required.' }
 
-  const exists = await prisma.user.findUnique({ where: { email } })
+  const { data: exists } = await supabase.from('User').select('id').eq('email', email).single()
   if (exists) return { error: 'A user with this email already exists.' }
 
   const hashed = await bcrypt.hash(password, 10)
-  await prisma.user.create({
-    data: { name, email, password: hashed, role: 'TEACHER', schoolId: session.schoolId },
+  await supabase.from('User').insert({
+    id: crypto.randomUUID(),
+    name,
+    email,
+    password: hashed,
+    role: 'TEACHER',
+    schoolId: session.schoolId,
   })
 
   revalidatePath('/settings')
@@ -36,14 +41,11 @@ export async function updateSchoolProfile(state: { error?: string; success?: str
 
   if (!name?.trim()) return { error: 'School name is required.' }
 
-  await prisma.school.update({
-    where: { id: session.schoolId },
-    data: {
-      name: name.trim(),
-      address: address?.trim() || null,
-      logo: logoUrl?.trim() || null,
-    },
-  })
+  await supabase.from('School').update({
+    name: name.trim(),
+    address: address?.trim() || null,
+    logo: logoUrl?.trim() || null,
+  }).eq('id', session.schoolId)
 
   revalidatePath('/settings')
   revalidatePath('/papers')

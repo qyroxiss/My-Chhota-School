@@ -1,7 +1,7 @@
 'use server'
 import { redirect } from 'next/navigation'
 import bcrypt from 'bcryptjs'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase'
 import { createSession, deleteSession } from '@/lib/session'
 
 export async function login(state: { error?: string } | undefined, formData: FormData) {
@@ -10,7 +10,12 @@ export async function login(state: { error?: string } | undefined, formData: For
 
   if (!email || !password) return { error: 'Email and password are required.' }
 
-  const user = await prisma.user.findUnique({ where: { email } })
+  const { data: user } = await supabase
+    .from('User')
+    .select('id, email, password, role, schoolId')
+    .eq('email', email)
+    .single()
+
   if (!user) return { error: 'Invalid email or password.' }
 
   const valid = await bcrypt.compare(password, user.password)

@@ -1,7 +1,7 @@
 'use server'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase'
 import { verifySession } from '@/lib/session'
 import { parsePaper } from '@/lib/parser'
 import type { ParsedPaper } from '@/lib/definitions'
@@ -9,8 +9,11 @@ import type { ParsedPaper } from '@/lib/definitions'
 export async function createTemplate(state: { error?: string } | undefined, formData: FormData) {
   const session = await verifySession()
 
-  const count = await prisma.template.count({ where: { schoolId: session.schoolId } })
-  if (count >= 5) return { error: 'Maximum of 5 templates allowed per school.' }
+  const { count } = await supabase
+    .from('Template')
+    .select('*', { count: 'exact', head: true })
+    .eq('schoolId', session.schoolId)
+  if ((count ?? 0) >= 5) return { error: 'Maximum of 5 templates allowed per school.' }
 
   const name = formData.get('name') as string
   const rawText = formData.get('rawText') as string
@@ -20,16 +23,15 @@ export async function createTemplate(state: { error?: string } | undefined, form
   const parsed: ParsedPaper = parsePaper(rawText)
   const structure = parsed
 
-  await prisma.template.create({
-    data: {
-      name,
-      class: parsed.class || 'N/A',
-      subject: parsed.subject || 'N/A',
-      maxMarks: parsed.maxMarks || 0,
-      duration: parsed.duration || null,
-      schoolId: session.schoolId,
-      structure: JSON.stringify(structure),
-    },
+  await supabase.from('Template').insert({
+    id: crypto.randomUUID(),
+    name,
+    class: parsed.class || 'N/A',
+    subject: parsed.subject || 'N/A',
+    maxMarks: parsed.maxMarks || 0,
+    duration: parsed.duration || null,
+    schoolId: session.schoolId,
+    structure: JSON.stringify(structure),
   })
 
   revalidatePath('/templates')
@@ -38,6 +40,6 @@ export async function createTemplate(state: { error?: string } | undefined, form
 
 export async function deleteTemplate(id: string) {
   const session = await verifySession()
-  await prisma.template.deleteMany({ where: { id, schoolId: session.schoolId } })
+  await supabase.from('Template').delete().eq('id', id).eq('schoolId', session.schoolId)
   revalidatePath('/templates')
 }
