@@ -38,5 +38,6 @@ export async function createPaper(state: { error?: string } | undefined, formDat
 export async function deletePaper(id: string) {
   const session = await verifySession()
   await supabase.from('Paper').delete().eq('id', id).eq('schoolId', session.schoolId)
-  revalidatePath('/papers')
+  revalidatePath('/', 'layout')
+  redirect('/papers')
 }

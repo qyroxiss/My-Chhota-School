@@ -18,63 +18,75 @@ export default async function PaperPreviewPage(props: PageProps<'/papers/[id]/pr
 
   return (
     <>
-      <div className="no-print print:hidden flex items-center justify-between px-8 py-4 bg-white border-b border-gray-200 sticky top-0 z-10">
-        <Link href="/papers" className="text-sm text-gray-500 hover:text-gray-900">← Back to Papers</Link>
+      {/* Top bar — hidden on print */}
+      <div className="no-print flex items-center justify-between px-6 py-3 bg-white border-b border-slate-200 sticky top-0 z-10">
+        <Link href="/papers" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-900 transition-colors font-medium">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+          Back to Papers
+        </Link>
         <PrintButton />
       </div>
 
-      <div className="paper-body max-w-3xl mx-auto my-8 bg-white p-10 shadow-sm rounded-xl">
+      {/* Paper body */}
+      <div className="paper-body max-w-3xl mx-auto my-8 bg-white p-12 shadow-sm rounded-2xl">
 
-        <div className="text-center mb-6 border-b-2 border-gray-800 pb-4">
+        {/* School header */}
+        <div className="text-center mb-7 pb-5 border-b-2 border-slate-800">
           {paper.school.logo && (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={paper.school.logo} alt="School logo" className="h-14 mx-auto mb-2 object-contain" />
           )}
-          <h2 className="text-xl font-bold text-gray-900 uppercase">{paper.school.name}</h2>
+          <h2 className="text-xl font-bold text-slate-900 uppercase tracking-wide">{paper.school.name}</h2>
           {paper.school.address && (
-            <p className="text-sm text-gray-600 mt-0.5">{paper.school.address}</p>
+            <p className="text-sm text-slate-500 mt-0.5">{paper.school.address}</p>
           )}
         </div>
 
-        <div className="flex justify-between items-start mb-6 text-sm">
-          <div className="space-y-0.5">
-            <p><span className="font-semibold">Class:</span> {content.class}</p>
-            <p><span className="font-semibold">Subject:</span> {content.subject}</p>
+        {/* Paper meta */}
+        <div className="flex justify-between items-start mb-8 text-sm">
+          <div className="space-y-1">
+            <p><span className="font-semibold text-slate-700">Class:</span> <span className="text-slate-900">{content.class}</span></p>
+            <p><span className="font-semibold text-slate-700">Subject:</span> <span className="text-slate-900">{content.subject}</span></p>
           </div>
-          <div className="text-right space-y-0.5">
-            {paper.date && <p><span className="font-semibold">Date:</span> {paper.date}</p>}
-            <p><span className="font-semibold">M.M.:</span> {content.maxMarks}</p>
-            {content.duration && <p><span className="font-semibold">Time:</span> {content.duration}</p>}
+          <div className="text-right space-y-1">
+            {paper.date && <p><span className="font-semibold text-slate-700">Date:</span> <span className="text-slate-900">{paper.date}</span></p>}
+            <p><span className="font-semibold text-slate-700">M.M.:</span> <span className="text-slate-900">{content.maxMarks}</span></p>
+            {content.duration && <p><span className="font-semibold text-slate-700">Time:</span> <span className="text-slate-900">{content.duration}</span></p>}
           </div>
         </div>
 
-        <div className="space-y-6">
+        {/* Questions */}
+        <div className="space-y-7">
           {content.questions.map((q, idx) => (
             <div key={idx}>
-              <div className="flex justify-between items-baseline mb-2">
-                <p className="font-bold text-gray-900">Q{idx + 1}) {q.title}</p>
-                {q.marks > 0 && <span className="text-sm font-medium text-gray-700 ml-4 shrink-0">({q.marks})</span>}
+              <div className="flex justify-between items-baseline mb-2.5">
+                <p className="font-bold text-slate-900">Q{idx + 1}) {q.title}</p>
+                {q.marks > 0 && (
+                  <span className="text-sm font-semibold text-slate-600 ml-4 shrink-0">({q.marks})</span>
+                )}
               </div>
 
-              {q.type === 'plain' && (
-                <div className="space-y-1.5 ml-4">
+              {q.type === 'plain' && q.subParts.length > 0 && (
+                <div className="space-y-2 ml-5">
                   {q.subParts.map(sp => (
-                    <p key={sp.label} className="text-sm text-gray-800">
-                      <span className="font-medium">{sp.label})</span>{' '}
-                      {sp.content || <span className="text-gray-400 italic">—</span>}
+                    <p key={sp.label} className="text-sm text-slate-800">
+                      <span className="font-semibold">{sp.label})</span>{' '}
+                      {sp.content || <span className="text-slate-400 italic">—</span>}
                     </p>
                   ))}
                 </div>
               )}
 
               {q.type === 'table' && (
-                <div className="ml-4 overflow-x-auto">
-                  <table className="w-full text-sm border-collapse border border-gray-700">
+                <div className="ml-5 overflow-x-auto">
+                  <table className="w-full text-sm border-collapse border border-slate-700">
                     <thead>
                       <tr>
-                        <th className="border border-gray-700 px-2 py-1.5 bg-gray-100 w-8"></th>
+                        <th className="border border-slate-700 px-2 py-1.5 bg-slate-100 w-8"></th>
                         {q.tableHeaders.map(h => (
-                          <th key={h} className="border border-gray-700 px-3 py-1.5 bg-gray-100 text-left font-semibold text-gray-800">
+                          <th key={h} className="border border-slate-700 px-3 py-1.5 bg-slate-100 text-left font-semibold text-slate-800">
                             {h}
                           </th>
                         ))}
@@ -83,13 +95,9 @@ export default async function PaperPreviewPage(props: PageProps<'/papers/[id]/pr
                     <tbody>
                       {q.tableRows.map((row, i) => (
                         <tr key={i}>
-                          <td className="border border-gray-700 px-2 py-2 font-medium text-gray-800 text-center w-8">
-                            {row.label})
-                          </td>
+                          <td className="border border-slate-700 px-2 py-2 font-semibold text-slate-800 text-center w-8">{row.label})</td>
                           {row.columns.map((col, j) => (
-                            <td key={j} className="border border-gray-700 px-3 py-2 text-gray-800">
-                              {col || ' '}
-                            </td>
+                            <td key={j} className="border border-slate-700 px-3 py-2 text-slate-800">{col || ' '}</td>
                           ))}
                         </tr>
                       ))}
@@ -101,7 +109,6 @@ export default async function PaperPreviewPage(props: PageProps<'/papers/[id]/pr
           ))}
         </div>
       </div>
-
-</>
+    </>
   )
 }

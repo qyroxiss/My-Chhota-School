@@ -1,20 +1,20 @@
 'use client'
 import { useState, useTransition } from 'react'
-import { deleteTemplate } from '@/app/actions/templates'
+import { deletePaper } from '@/app/actions/papers'
 
-export default function DeleteTemplateButton({ id, name }: { id: string; name: string }) {
+export default function DeletePaperButton({ id }: { id: string }) {
   const [open, setOpen] = useState(false)
   const [pending, startTransition] = useTransition()
 
   function handleConfirm() {
-    startTransition(() => deleteTemplate(id))
+    startTransition(() => deletePaper(id))
   }
 
   return (
     <>
       <button
         onClick={() => setOpen(true)}
-        className="px-3 py-2 text-xs font-semibold text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
+        className="text-sm text-red-500 hover:text-red-700 font-medium transition-colors"
       >
         Delete
       </button>
@@ -30,13 +30,11 @@ export default function DeleteTemplateButton({ id, name }: { id: string; name: s
                 </svg>
               </div>
               <div>
-                <h3 className="font-semibold text-slate-900">Delete Template</h3>
+                <h3 className="font-semibold text-slate-900">Delete Paper</h3>
                 <p className="text-sm text-slate-500">This action cannot be undone.</p>
               </div>
             </div>
-            <p className="text-sm text-slate-600 mb-5">
-              Are you sure you want to delete <span className="font-semibold text-slate-900">&ldquo;{name}&rdquo;</span>?
-            </p>
+            <p className="text-sm text-slate-600 mb-5">Are you sure you want to permanently delete this paper?</p>
             <div className="flex gap-3">
               <button
                 onClick={() => setOpen(false)}
