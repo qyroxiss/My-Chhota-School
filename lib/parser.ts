@@ -54,18 +54,28 @@ export function parsePaper(text: string): ParsedPaper {
       i++
     }
 
-    // Collect sub-parts
-    while (i < lines.length && isSubPart(lines[i])) {
+    // Collect sub-parts — skip word bank / passage lines that appear between
+    // the question stem and its lettered sub-parts (e.g. "(play, is, drinking, reading)")
+    while (i < lines.length) {
       const subLine = lines[i]
-      const { label, content } = parseSubPart(subLine)
-
-      if (isTable) {
-        const blankCols = Math.max(0, question.tableHeaders.length - 1)
-        question.tableRows.push({ label, columns: [content, ...Array(blankCols).fill('')] })
+      if (isSubPart(subLine)) {
+        const { label, content } = parseSubPart(subLine)
+        if (isTable) {
+          const blankCols = Math.max(0, question.tableHeaders.length - 1)
+          question.tableRows.push({ label, columns: [content, ...Array(blankCols).fill('')] })
+        } else {
+          question.subParts.push({ label, content })
+        }
+        i++
+      } else if (
+        !isQuestionStart(subLine) &&
+        !/^[=\-*]{3,}/.test(subLine) &&
+        !/^(?:I{1,3}|IV|V?I{0,3}|IX|X)[.)]\s+/i.test(subLine)
+      ) {
+        i++ // skip instruction / word bank line
       } else {
-        question.subParts.push({ label, content })
+        break
       }
-      i++
     }
 
     result.questions.push(question)

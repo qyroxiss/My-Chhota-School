@@ -49,11 +49,11 @@ export default async function PaperPreviewPage(props: PageProps<'/papers/[id]/pr
         </div>
 
         <div className="space-y-6">
-          {content.questions.map(q => (
-            <div key={q.number}>
+          {content.questions.map((q, idx) => (
+            <div key={idx}>
               <div className="flex justify-between items-baseline mb-2">
-                <p className="font-bold text-gray-900">Q{q.number}) {q.title}</p>
-                <span className="text-sm font-medium text-gray-700 ml-4 shrink-0">({q.marks})</span>
+                <p className="font-bold text-gray-900">Q{idx + 1}) {q.title}</p>
+                {q.marks > 0 && <span className="text-sm font-medium text-gray-700 ml-4 shrink-0">({q.marks})</span>}
               </div>
 
               {q.type === 'plain' && (
