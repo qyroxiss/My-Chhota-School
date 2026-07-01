@@ -28,13 +28,13 @@ export async function createTemplate(state: { error?: string } | undefined, form
     structure: JSON.stringify(structure),
   })
 
-  revalidatePath('/templates')
+  revalidatePath('/', 'layout')
   redirect('/templates')
 }
 
 export async function deleteTemplate(id: string) {
   const session = await verifySession()
   await supabase.from('Template').delete().eq('id', id).eq('schoolId', session.schoolId)
-  revalidatePath('/templates')
+  revalidatePath('/', 'layout')
   redirect('/templates')
 }
