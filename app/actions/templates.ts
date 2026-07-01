@@ -32,7 +32,7 @@ export async function createTemplate(state: { error?: string } | undefined, form
   redirect('/templates')
 }
 
-export async function deleteTemplate(id: string, _formData: FormData) {
+export async function deleteTemplate(id: string) {
   const session = await verifySession()
   await supabase.from('Template').delete().eq('id', id).eq('schoolId', session.schoolId)
   revalidatePath('/templates')

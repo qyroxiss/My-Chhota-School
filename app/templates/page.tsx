@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { getTemplates } from '@/lib/dal'
-import { deleteTemplate } from '@/app/actions/templates'
+import DeleteTemplateButton from '@/components/DeleteTemplateButton'
 
 export default async function TemplatesPage() {
   const templates = await getTemplates()
@@ -44,11 +44,7 @@ export default async function TemplatesPage() {
                 <Link href={`/papers/new?templateId=${t.id}`} className="text-sm bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg hover:bg-blue-100 transition-colors font-medium">
                   Use
                 </Link>
-                <form action={deleteTemplate.bind(null, t.id)}>
-                  <button type="submit" className="text-sm text-red-500 hover:text-red-700 transition-colors">
-                    Delete
-                  </button>
-                </form>
+                <DeleteTemplateButton id={t.id} />
               </div>
             </div>
           ))}
