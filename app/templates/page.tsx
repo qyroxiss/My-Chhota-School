@@ -10,16 +10,14 @@ export default async function TemplatesPage() {
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Templates</h1>
-          <p className="text-gray-500 mt-1">{templates.length}/5 templates used</p>
+          <p className="text-gray-500 mt-1">{templates.length} template{templates.length !== 1 ? 's' : ''}</p>
         </div>
-        {templates.length < 5 && (
-          <Link
-            href="/templates/new"
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
-          >
-            + New Template
-          </Link>
-        )}
+        <Link
+          href="/templates/new"
+          className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+        >
+          + New Template
+        </Link>
       </div>
 
       {templates.length === 0 ? (

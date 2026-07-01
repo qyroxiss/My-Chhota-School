@@ -9,12 +9,6 @@ import type { ParsedPaper } from '@/lib/definitions'
 export async function createTemplate(state: { error?: string } | undefined, formData: FormData) {
   const session = await verifySession()
 
-  const { count } = await supabase
-    .from('Template')
-    .select('*', { count: 'exact', head: true })
-    .eq('schoolId', session.schoolId)
-  if ((count ?? 0) >= 5) return { error: 'Maximum of 5 templates allowed per school.' }
-
   const name = formData.get('name') as string
   const rawText = formData.get('rawText') as string
 
@@ -38,8 +32,9 @@ export async function createTemplate(state: { error?: string } | undefined, form
   redirect('/templates')
 }
 
-export async function deleteTemplate(id: string) {
+export async function deleteTemplate(id: string, _formData: FormData) {
   const session = await verifySession()
   await supabase.from('Template').delete().eq('id', id).eq('schoolId', session.schoolId)
   revalidatePath('/templates')
+  redirect('/templates')
 }
