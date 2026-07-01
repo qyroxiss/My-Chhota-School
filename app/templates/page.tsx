@@ -44,7 +44,7 @@ export default async function TemplatesPage() {
                 <Link href={`/papers/new?templateId=${t.id}`} className="text-sm bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg hover:bg-blue-100 transition-colors font-medium">
                   Use
                 </Link>
-                <DeleteTemplateButton id={t.id} />
+                <DeleteTemplateButton id={t.id} name={t.name} />
               </div>
             </div>
           ))}
