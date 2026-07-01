@@ -12,7 +12,8 @@ export default function NewTemplatePage() {
   const [tab, setTab] = useState<'paste' | 'upload'>('paste')
   const [extracting, setExtracting] = useState(false)
   const [extractError, setExtractError] = useState<string | null>(null)
-  const [fileName, setFileName] = useState<string | null>(null)
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([])
+  const [extractProgress, setExtractProgress] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
 
   function handleTextChange(text: string) {
@@ -24,15 +25,31 @@ export default function NewTemplatePage() {
     }
   }
 
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? [])
+    setSelectedFiles(files)
+    setExtractError(null)
+  }
+
+  function removeFile(index: number) {
+    const updated = selectedFiles.filter((_, i) => i !== index)
+    setSelectedFiles(updated)
+    if (fileRef.current) fileRef.current.value = ''
+  }
+
   async function handleExtract() {
-    const file = fileRef.current?.files?.[0]
-    if (!file) return
+    if (!selectedFiles.length) return
     setExtracting(true)
     setExtractError(null)
+    setExtractProgress(`Extracting ${selectedFiles.length} file${selectedFiles.length > 1 ? 's' : ''}…`)
+
     const fd = new FormData()
-    fd.append('file', file)
+    for (const file of selectedFiles) fd.append('file', file)
+
     const result = await extractTextFromFile(fd)
     setExtracting(false)
+    setExtractProgress('')
+
     if (result.error) {
       setExtractError(result.error)
     } else if (result.text) {
@@ -41,11 +58,13 @@ export default function NewTemplatePage() {
     }
   }
 
+  const hasImages = selectedFiles.some(f => f.type.startsWith('image/') || /\.(jpg|jpeg|png|bmp|webp)$/i.test(f.name))
+
   return (
     <div className="p-8 max-w-4xl">
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-gray-900">Create Template</h1>
-        <p className="text-gray-500 mt-1">Paste text or upload a file — the system will auto-detect the question paper structure.</p>
+        <p className="text-gray-500 mt-1">Paste text or upload files — the system will auto-detect the question paper structure.</p>
       </div>
 
       <form action={action} className="space-y-6">
@@ -70,9 +89,7 @@ export default function NewTemplatePage() {
               type="button"
               onClick={() => setTab('paste')}
               className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                tab === 'paste'
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                tab === 'paste' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
               }`}
             >
               Paste Text
@@ -81,12 +98,10 @@ export default function NewTemplatePage() {
               type="button"
               onClick={() => setTab('upload')}
               className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                tab === 'upload'
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                tab === 'upload' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
               }`}
             >
-              Upload File
+              Upload Files
             </button>
           </div>
 
@@ -108,31 +123,50 @@ export default function NewTemplatePage() {
 
           {tab === 'upload' && (
             <div className="space-y-4">
-              {/* Hidden textarea to keep form valid */}
+              {/* Hidden textarea keeps form submission valid */}
               <textarea name="rawText" value={rawText} onChange={() => {}} className="hidden" required />
 
-              <label className="flex flex-col items-center justify-center w-full h-40 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors bg-gray-50">
-                <div className="text-center">
-                  <svg className="mx-auto mb-2 w-8 h-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                  </svg>
-                  <p className="text-sm text-gray-600">
-                    {fileName ? (
-                      <span className="font-medium text-blue-600">{fileName}</span>
-                    ) : (
-                      <>Click to select or drag & drop</>
-                    )}
-                  </p>
-                  <p className="text-xs text-gray-400 mt-1">PDF, Word (.docx), JPG, PNG — max 10 MB</p>
-                </div>
+              {/* Drop zone */}
+              <label className="flex flex-col items-center justify-center w-full h-36 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors bg-gray-50">
+                <svg className="mb-2 w-8 h-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                </svg>
+                <p className="text-sm text-gray-600 font-medium">Click to select files</p>
+                <p className="text-xs text-gray-400 mt-1">PDF, Word (.docx), JPG, PNG · multiple files allowed · max 25 MB total</p>
                 <input
                   ref={fileRef}
                   type="file"
+                  multiple
                   className="hidden"
                   accept=".pdf,.docx,.jpg,.jpeg,.png,.bmp,.webp"
-                  onChange={e => setFileName(e.target.files?.[0]?.name ?? null)}
+                  onChange={handleFileChange}
                 />
               </label>
+
+              {/* Selected file list */}
+              {selectedFiles.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{selectedFiles.length} file{selectedFiles.length > 1 ? 's' : ''} selected</p>
+                  {selectedFiles.map((file, i) => (
+                    <div key={i} className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-base">
+                          {file.type.startsWith('image/') ? '🖼️' : file.name.endsWith('.pdf') ? '📄' : '📝'}
+                        </span>
+                        <span className="text-sm text-gray-700 truncate">{file.name}</span>
+                        <span className="text-xs text-gray-400 shrink-0">({(file.size / 1024).toFixed(0)} KB)</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeFile(i)}
+                        className="ml-2 text-gray-400 hover:text-red-500 text-lg leading-none shrink-0"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {extractError && (
                 <p className="text-red-600 text-sm bg-red-50 px-3 py-2 rounded-lg">{extractError}</p>
@@ -141,15 +175,17 @@ export default function NewTemplatePage() {
               <button
                 type="button"
                 onClick={handleExtract}
-                disabled={!fileName || extracting}
+                disabled={!selectedFiles.length || extracting}
                 className="w-full bg-blue-600 text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
-                {extracting ? 'Extracting text…' : 'Extract Text from File'}
+                {extracting ? extractProgress : `Extract Text from ${selectedFiles.length || ''} File${selectedFiles.length !== 1 ? 's' : ''}`}
               </button>
 
               {extracting && (
                 <p className="text-xs text-gray-500 text-center">
-                  This may take 10–30 seconds for images. Please wait…
+                  {hasImages
+                    ? 'Reading images with OCR (English + Hindi). This may take 20–60 seconds per image…'
+                    : 'Extracting text from documents…'}
                 </p>
               )}
             </div>
