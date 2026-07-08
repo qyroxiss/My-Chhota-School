@@ -1,20 +1,58 @@
 'use server'
 import mammoth from 'mammoth'
 
+/**
+ * PDFs created by many tools set hasEOL=false on every text item, producing one
+ * long string with no line breaks. This function inserts newlines at the structural
+ * boundaries a question paper always has, so the parser can find questions.
+ */
+function addLineBreaks(raw: string): string {
+  let t = raw.replace(/[ \t]+/g, ' ').trim()
+
+  // Separator lines (====...====) get their own line
+  t = t.replace(/\s*(={4,})\s*/g, '\n$1\n')
+
+  // SUBJECT: header on its own line
+  t = t.replace(/\s+(?=SUBJECT\s*:)/gi, '\n')
+
+  // Roman numeral section headers (I. II. III. IV. V. VI. etc.)
+  // Requires a period immediately after and whitespace following — avoids mid-word hits
+  t = t.replace(/\s+(?=(?:I{1,3}|IV|VI{0,3}|IX|X{1,3})[.]\s)/g, '\n')
+
+  // Numbered questions: 1. 2. 3. (1–2 digit number + period + space)
+  // Won't hit: "102," "23 +" "3.14" — period not followed by space in those cases
+  t = t.replace(/\s+(?=\d{1,2}[.]\s+\S)/g, '\n')
+
+  // Q1. Q2. style questions
+  t = t.replace(/\s+(?=[Qq]\d+[.:)]\s)/g, '\n')
+
+  // Sub-parts: a) b) c) etc.
+  t = t.replace(/\s+(?=[a-z][)]\s)/g, '\n')
+
+  // MCQ options in parens: (a) (b) (c) (d)
+  // Won't hit "(play, is...)" because that has more than one letter before the closing paren
+  t = t.replace(/\s+(?=\([a-z]\)\s)/g, '\n')
+
+  // Clean up any triple+ newlines introduced above
+  return t.replace(/\n{3,}/g, '\n\n').trim()
+}
+
 async function extractSingleFile(file: File): Promise<{ text?: string; error?: string }> {
   const bytes = await file.arrayBuffer()
   const buffer = Buffer.from(bytes)
   const name = file.name.toLowerCase()
   const type = file.type
 
-  // PDF — use unpdf which is built for serverless (no DOMMatrix/canvas dependency)
+  // PDF — extract raw text then reconstruct line breaks from content patterns,
+  // because many PDF generators set hasEOL=false on every item (one flat string).
   if (type === 'application/pdf' || name.endsWith('.pdf')) {
     const { extractText } = await import('unpdf')
     const uint8Array = new Uint8Array(bytes)
-    const { text } = await extractText(uint8Array, { mergePages: true })
-    if (!text.trim())
+    const { text: pages } = await extractText(uint8Array)
+    const raw = (pages as string[]).join('\n\n')
+    if (!raw.trim())
       return { error: `"${file.name}": No readable text found. If it is a scanned PDF, upload it as an image instead.` }
-    return { text }
+    return { text: addLineBreaks(raw) }
   }
 
   // Word document (.docx)

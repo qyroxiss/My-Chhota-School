@@ -32,7 +32,7 @@ export function parsePaper(text: string): ParsedPaper {
     const timeMatch = line.match(/(?:^|\|)\s*(?:time|duration)[:\s]+(.+?)(?:\s*\||$)/i)
 
     if (classMatch && !result.class) result.class = classMatch[1].trim()
-    else if (subMatch && !result.subject) result.subject = subMatch[1].trim()
+    else if (subMatch && !result.subject) result.subject = cleanSubjectName(subMatch[1])
     if (mmMatch && !result.maxMarks) result.maxMarks = parseInt(mmMatch[1])
     if (timeMatch && !result.duration) result.duration = timeMatch[1].trim()
     i++
@@ -56,7 +56,14 @@ export function parsePaper(text: string): ParsedPaper {
     // Detect new SUBJECT: line (multi-subject papers)
     const subjectMatch = line.match(/^sub(?:ject)?[:\s]+(.+)/i)
     if (subjectMatch) {
-      pendingSection = { subject: subjectMatch[1].trim(), maxMarks: 0, duration: '' }
+      const full = subjectMatch[1]
+      const mm = full.match(/(?:\||^)\s*(?:mm|max\.?\s*marks?|total\s*marks?)[:\s]+(\d+)/i)
+      const tm = full.match(/(?:\||^)\s*(?:time|duration)[:\s]+(.+?)(?:\s*\||$)/i)
+      pendingSection = {
+        subject: cleanSubjectName(full),
+        maxMarks: mm ? parseInt(mm[1]) : 0,
+        duration: tm ? tm[1].trim() : '',
+      }
       i++; continue
     }
 
@@ -162,6 +169,17 @@ function parseSubPart(line: string): { label: string; content: string } {
   const match = line.match(/^([a-z])\s*[.)]\s*(.*)/i)
   if (!match) return { label: '', content: line }
   return { label: match[1].toLowerCase(), content: match[2].trim() }
+}
+
+function cleanSubjectName(raw: string): string {
+  return raw
+    .replace(/\s*\|.*$/, '')                       // strip " | Time: ..." suffix
+    .replace(/\s+total\s*marks?\s*:.*$/i, '')      // strip "Total Marks: ..."
+    .replace(/\s+max\.?\s*marks?\s*:.*$/i, '')     // strip "Max Marks: ..."
+    .replace(/\s+mm\s*:.*$/i, '')                  // strip "MM: ..."
+    .replace(/\s+time\s*:.*$/i, '')                // strip "Time: ..."
+    .replace(/\s+duration\s*:.*$/i, '')            // strip "Duration: ..."
+    .trim()
 }
 
 export function stripContent(paper: ParsedPaper): ParsedPaper {
