@@ -78,6 +78,10 @@ export default function PaperEditor({ template }: { template: Template }) {
             {q.subsectionLabel && (
               <p className="text-xs font-semibold text-slate-500 italic px-1 mt-3 mb-1">{q.subsectionLabel}</p>
             )}
+            {/* Subsection passage / instructions */}
+            {q.subsectionIntro && (
+              <p className="text-xs text-slate-600 px-1 mb-2 leading-relaxed whitespace-pre-line">{q.subsectionIntro}</p>
+            )}
 
           <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
             {/* Question header */}
@@ -94,6 +98,11 @@ export default function PaperEditor({ template }: { template: Template }) {
                 </span>
               )}
             </div>
+
+            {/* Word bank / instruction for this question */}
+            {q.intro && (
+              <p className="text-xs text-slate-500 italic px-5 pt-3">{q.intro}</p>
+            )}
 
             {/* Sub-parts / table */}
             {q.type === 'plain' && q.subParts.length > 0 && (

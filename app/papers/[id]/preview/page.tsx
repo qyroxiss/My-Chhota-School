@@ -90,6 +90,11 @@ export default async function PaperPreviewPage(props: PageProps<'/papers/[id]/pr
                 <p className="font-semibold text-slate-700 text-sm mt-4 mb-2 italic">{q.subsectionLabel}</p>
               )}
 
+              {/* Subsection passage / instructions (e.g. reading comprehension text) */}
+              {q.subsectionIntro && (
+                <p className="text-sm text-slate-700 mb-3 leading-relaxed whitespace-pre-line">{q.subsectionIntro}</p>
+              )}
+
               {/* Question */}
               <div className={q.sectionLabel || q.subsectionLabel ? '' : ''}>
                 <div className="flex justify-between items-baseline mb-2">
@@ -98,6 +103,11 @@ export default async function PaperPreviewPage(props: PageProps<'/papers/[id]/pr
                     <span className="text-sm font-semibold text-slate-600 ml-4 shrink-0">({q.marks})</span>
                   )}
                 </div>
+
+                {/* Word bank / instruction for this question */}
+                {q.intro && (
+                  <p className="text-sm text-slate-600 italic ml-5 mb-2">{q.intro}</p>
+                )}
 
                 {q.type === 'plain' && q.subParts.length > 0 && (
                   <div className="space-y-1.5 ml-5">

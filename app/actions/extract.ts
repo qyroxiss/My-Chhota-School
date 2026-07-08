@@ -19,6 +19,10 @@ function addLineBreaks(raw: string): string {
   // Requires a period immediately after and whitespace following — avoids mid-word hits
   t = t.replace(/\s+(?=(?:I{1,3}|IV|VI{0,3}|IX|X{1,3})[.]\s)/g, '\n')
 
+  // Break after a section marks marker like "(10 marks)" so any passage that follows
+  // a section header (e.g. reading comprehension text) starts on its own line
+  t = t.replace(/(\(\d+\s*marks?\))\s+/gi, '$1\n')
+
   // Numbered questions: 1. 2. 3. (1–2 digit number + period + space)
   // Won't hit: "102," "23 +" "3.14" — period not followed by space in those cases
   t = t.replace(/\s+(?=\d{1,2}[.]\s+\S)/g, '\n')

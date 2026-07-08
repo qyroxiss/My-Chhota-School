@@ -25,6 +25,8 @@ export type Question = {
   tableRows: TableRow[]
   sectionLabel?: { subject: string; maxMarks: number; duration: string }
   subsectionLabel?: string
+  subsectionIntro?: string // passage / instructions after a subsection header (e.g. reading comprehension text)
+  intro?: string // word bank / instruction text between the question and its sub-parts
 }
 
 export type ParsedPaper = {

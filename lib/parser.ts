@@ -13,6 +13,7 @@ export function parsePaper(text: string): ParsedPaper {
 
   let i = 0
   let pendingSubsection: string | null = null
+  let pendingSubsectionIntro: string | null = null
 
   // Parse header lines — stop at the first question
   while (i < lines.length && !isQuestionStart(lines[i])) {
@@ -23,18 +24,25 @@ export function parsePaper(text: string): ParsedPaper {
     // Roman numeral subsection headers before the first question (first section)
     if (/^(?:I{1,3}|IV|V?I{0,3}|IX|X)[.)]\s+/i.test(line)) {
       pendingSubsection = line
+      pendingSubsectionIntro = null
+      i++; continue
+    }
+
+    // After a subsection header, capture passage / instruction text (e.g. reading comprehension)
+    if (pendingSubsection && !isHeaderMeta(line)) {
+      pendingSubsectionIntro = pendingSubsectionIntro ? `${pendingSubsectionIntro} ${line}` : line
       i++; continue
     }
 
     const classMatch = line.match(/^class[:\s-]+(.+)/i)
     const subMatch = line.match(/^sub(?:ject)?[:\s]+(.+)/i)
-    const mmMatch = line.match(/(?:^|\|)\s*(?:mm|max\.?\s*marks?|total\s*marks?)[:\s]+(\d+)/i)
-    const timeMatch = line.match(/(?:^|\|)\s*(?:time|duration)[:\s]+(.+?)(?:\s*\||$)/i)
+    const mm = extractMarks(line)
+    const dur = extractDuration(line)
 
-    if (classMatch && !result.class) result.class = classMatch[1].trim()
+    if (classMatch && !result.class) result.class = cleanSubjectName(classMatch[1])
     else if (subMatch && !result.subject) result.subject = cleanSubjectName(subMatch[1])
-    if (mmMatch && !result.maxMarks) result.maxMarks = parseInt(mmMatch[1])
-    if (timeMatch && !result.duration) result.duration = timeMatch[1].trim()
+    if (mm !== null && !result.maxMarks) result.maxMarks = mm
+    if (dur && !result.duration) result.duration = dur
     i++
   }
 
@@ -50,6 +58,7 @@ export function parsePaper(text: string): ParsedPaper {
     // Detect Roman numeral subsection headers (I. Grammar…, II. Reading…)
     if (/^(?:I{1,3}|IV|V?I{0,3}|IX|X)[.)]\s+/i.test(line)) {
       pendingSubsection = line
+      pendingSubsectionIntro = null
       i++; continue
     }
 
@@ -57,22 +66,29 @@ export function parsePaper(text: string): ParsedPaper {
     const subjectMatch = line.match(/^sub(?:ject)?[:\s]+(.+)/i)
     if (subjectMatch) {
       const full = subjectMatch[1]
-      const mm = full.match(/(?:\||^)\s*(?:mm|max\.?\s*marks?|total\s*marks?)[:\s]+(\d+)/i)
-      const tm = full.match(/(?:\||^)\s*(?:time|duration)[:\s]+(.+?)(?:\s*\||$)/i)
       pendingSection = {
         subject: cleanSubjectName(full),
-        maxMarks: mm ? parseInt(mm[1]) : 0,
-        duration: tm ? tm[1].trim() : '',
+        maxMarks: extractMarks(full) ?? 0,
+        duration: extractDuration(full) ?? '',
       }
       i++; continue
     }
 
     // When a pending section is open, absorb its marks/duration lines before any questions
     if (pendingSection && !isQuestionStart(line)) {
-      const mm = line.match(/(?:^|\|)\s*(?:mm|max\.?\s*marks?|total\s*marks?)[:\s]+(\d+)/i)
-      const tm = line.match(/(?:^|\|)\s*(?:time|duration)[:\s]+(.+?)(?:\s*\||$)/i)
-      if (mm) pendingSection.maxMarks = parseInt(mm[1])
-      if (tm) pendingSection.duration = tm[1].trim()
+      const mm = extractMarks(line)
+      const dur = extractDuration(line)
+      if (mm !== null || dur !== null) {
+        if (mm !== null) pendingSection.maxMarks = mm
+        if (dur !== null) pendingSection.duration = dur
+        i++; continue
+      }
+      // otherwise fall through — it is passage / instruction text
+    }
+
+    // After a subsection header, capture passage / instruction text before the first question
+    if (pendingSubsection && !isQuestionStart(line)) {
+      pendingSubsectionIntro = pendingSubsectionIntro ? `${pendingSubsectionIntro} ${line}` : line
       i++; continue
     }
 
@@ -89,6 +105,10 @@ export function parsePaper(text: string): ParsedPaper {
     if (pendingSubsection) {
       question.subsectionLabel = pendingSubsection
       pendingSubsection = null
+    }
+    if (pendingSubsectionIntro) {
+      question.subsectionIntro = pendingSubsectionIntro
+      pendingSubsectionIntro = null
     }
 
     // Table check
@@ -117,7 +137,11 @@ export function parsePaper(text: string): ParsedPaper {
         !/^(?:I{1,3}|IV|V?I{0,3}|IX|X)[.)]\s+/i.test(subLine) &&
         !/^sub(?:ject)?[:\s]+/i.test(subLine)
       ) {
-        i++ // skip word bank / instruction / passage lines
+        // Word bank / instruction line between a question and its sub-parts — keep it
+        if (question.subParts.length === 0 && question.tableRows.length === 0) {
+          question.intro = question.intro ? `${question.intro} ${subLine}` : subLine
+        }
+        i++
       } else {
         break
       }
@@ -169,6 +193,29 @@ function parseSubPart(line: string): { label: string; content: string } {
   const match = line.match(/^([a-z])\s*[.)]\s*(.*)/i)
   if (!match) return { label: '', content: line }
   return { label: match[1].toLowerCase(), content: match[2].trim() }
+}
+
+// Extract a max-marks value ("Total Marks: 20", "Max Marks: 20", "MM: 20", "M.M.: 20").
+// Keyword may be at line start, after a pipe, or after the subject name (a space).
+function extractMarks(s: string): number | null {
+  const m = s.match(/(?:^|[|\s])(?:total\s*marks?|max\.?\s*marks?|m\.?\s*m\.?)\s*[:\-]?\s*(\d+)/i)
+  return m ? parseInt(m[1]) : null
+}
+
+// Extract a duration value ("Time: 1 Hour", "Duration: 30 Minutes"), stopping at a pipe/end.
+function extractDuration(s: string): string | null {
+  const m = s.match(/(?:^|[|\s])(?:time|duration)\s*[:\-]?\s*(.+?)(?:\s*\||$)/i)
+  return m ? m[1].trim() : null
+}
+
+function isHeaderMeta(line: string): boolean {
+  return (
+    /^class[:\s-]/i.test(line) ||
+    /^sub(?:ject)?[:\s]/i.test(line) ||
+    /(?:^|\|)\s*(?:mm|max\.?\s*marks?|total\s*marks?)[:\s]/i.test(line) ||
+    /(?:^|\|)\s*(?:time|duration)[:\s]/i.test(line) ||
+    /^[=\-*]{3,}/.test(line)
+  )
 }
 
 function cleanSubjectName(raw: string): string {
