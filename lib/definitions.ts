@@ -23,6 +23,8 @@ export type Question = {
   subParts: SubPart[]
   tableHeaders: string[]
   tableRows: TableRow[]
+  sectionLabel?: { subject: string; maxMarks: number; duration: string }
+  subsectionLabel?: string
 }
 
 export type ParsedPaper = {

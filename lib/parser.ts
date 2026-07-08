@@ -12,13 +12,19 @@ export function parsePaper(text: string): ParsedPaper {
   }
 
   let i = 0
+  let pendingSubsection: string | null = null
 
   // Parse header lines — stop at the first question
   while (i < lines.length && !isQuestionStart(lines[i])) {
     const line = lines[i]
 
-    // Skip visual separator lines like ===, ---, ***
     if (/^[=\-*]{3,}/.test(line)) { i++; continue }
+
+    // Roman numeral subsection headers before the first question (first section)
+    if (/^(?:I{1,3}|IV|V?I{0,3}|IX|X)[.)]\s+/i.test(line)) {
+      pendingSubsection = line
+      i++; continue
+    }
 
     const classMatch = line.match(/^class[:\s-]+(.+)/i)
     const subMatch = line.match(/^sub(?:ject)?[:\s]+(.+)/i)
@@ -33,11 +39,33 @@ export function parsePaper(text: string): ParsedPaper {
   }
 
   // Parse question blocks
+  let pendingSection: { subject: string; maxMarks: number; duration: string } | null = null
+
   while (i < lines.length) {
     const line = lines[i]
 
-    // Skip separator lines and section headers (Roman numerals: I. II. III.)
-    if (/^[=\-*]{3,}/.test(line) || /^(?:I{1,3}|IV|V?I{0,3}|IX|X)[.)]\s+/i.test(line)) {
+    // Skip visual separators
+    if (/^[=\-*]{3,}/.test(line)) { i++; continue }
+
+    // Detect Roman numeral subsection headers (I. Grammar…, II. Reading…)
+    if (/^(?:I{1,3}|IV|V?I{0,3}|IX|X)[.)]\s+/i.test(line)) {
+      pendingSubsection = line
+      i++; continue
+    }
+
+    // Detect new SUBJECT: line (multi-subject papers)
+    const subjectMatch = line.match(/^sub(?:ject)?[:\s]+(.+)/i)
+    if (subjectMatch) {
+      pendingSection = { subject: subjectMatch[1].trim(), maxMarks: 0, duration: '' }
+      i++; continue
+    }
+
+    // When a pending section is open, absorb its marks/duration lines before any questions
+    if (pendingSection && !isQuestionStart(line)) {
+      const mm = line.match(/(?:^|\|)\s*(?:mm|max\.?\s*marks?|total\s*marks?)[:\s]+(\d+)/i)
+      const tm = line.match(/(?:^|\|)\s*(?:time|duration)[:\s]+(.+?)(?:\s*\||$)/i)
+      if (mm) pendingSection.maxMarks = parseInt(mm[1])
+      if (tm) pendingSection.duration = tm[1].trim()
       i++; continue
     }
 
@@ -46,7 +74,17 @@ export function parsePaper(text: string): ParsedPaper {
     const question = parseQuestion(line)
     i++
 
-    // Check for table header (pipe-separated)
+    // Attach pending section / subsection labels to the first question in each group
+    if (pendingSection) {
+      question.sectionLabel = { ...pendingSection }
+      pendingSection = null
+    }
+    if (pendingSubsection) {
+      question.subsectionLabel = pendingSubsection
+      pendingSubsection = null
+    }
+
+    // Table check
     const isTable = i < lines.length && lines[i].startsWith('|')
     if (isTable) {
       question.type = 'table'
@@ -54,8 +92,7 @@ export function parsePaper(text: string): ParsedPaper {
       i++
     }
 
-    // Collect sub-parts — skip word bank / passage lines that appear between
-    // the question stem and its lettered sub-parts (e.g. "(play, is, drinking, reading)")
+    // Collect sub-parts — skip word bank / passage lines between question and sub-parts
     while (i < lines.length) {
       const subLine = lines[i]
       if (isSubPart(subLine)) {
@@ -70,9 +107,10 @@ export function parsePaper(text: string): ParsedPaper {
       } else if (
         !isQuestionStart(subLine) &&
         !/^[=\-*]{3,}/.test(subLine) &&
-        !/^(?:I{1,3}|IV|V?I{0,3}|IX|X)[.)]\s+/i.test(subLine)
+        !/^(?:I{1,3}|IV|V?I{0,3}|IX|X)[.)]\s+/i.test(subLine) &&
+        !/^sub(?:ject)?[:\s]+/i.test(subLine)
       ) {
-        i++ // skip instruction / word bank line
+        i++ // skip word bank / instruction / passage lines
       } else {
         break
       }
@@ -85,23 +123,18 @@ export function parsePaper(text: string): ParsedPaper {
 }
 
 function isQuestionStart(line: string): boolean {
-  // Q1) Q1. Q1: (existing format)
   if (/^q\d+[.):\s]/i.test(line)) return true
-  // 1. or 1) followed by text (plain numbered questions)
-  // Exclude Roman numerals by checking it's a digit
   if (/^\d+[.)]\s+\S/.test(line)) return true
   return false
 }
 
 function isSubPart(line: string): boolean {
-  // lowercase only: a) a. or (a) style — uppercase excluded to avoid matching Roman numeral headers like I. II.
+  // Lowercase only — excludes uppercase Roman numeral headers like I. II.
   return /^[a-z]\s*[.)]/.test(line) || /^\([a-z]\)/.test(line)
 }
 
 function parseQuestion(line: string): Question {
-  // Q1) Title (5)  or  Q2) Title: 5  or  Q1. Title
   const matchQ = line.match(/^q(\d+)[.):\s]+(.+?)\s*(?:\((\d+)\))?\s*$/i)
-  // 1. Title (5)  or  1) Title
   const matchN = line.match(/^(\d+)[.)]\s+(.+?)\s*(?:\((\d+)\))?\s*$/i)
 
   let number = 1, title = '', marks = 0
@@ -124,16 +157,13 @@ function parseTableHeader(line: string): string[] {
 }
 
 function parseSubPart(line: string): { label: string; content: string } {
-  // (a) content style
   const matchParen = line.match(/^\(([a-z])\)\s*(.*)/i)
   if (matchParen) return { label: matchParen[1].toLowerCase(), content: matchParen[2].trim() }
-  // a) or a. style
   const match = line.match(/^([a-z])\s*[.)]\s*(.*)/i)
   if (!match) return { label: '', content: line }
   return { label: match[1].toLowerCase(), content: match[2].trim() }
 }
 
-// Strip content from a parsed paper to create a blank template structure
 export function stripContent(paper: ParsedPaper): ParsedPaper {
   return {
     ...paper,
