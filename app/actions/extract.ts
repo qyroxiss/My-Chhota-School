@@ -7,14 +7,14 @@ async function extractSingleFile(file: File): Promise<{ text?: string; error?: s
   const name = file.name.toLowerCase()
   const type = file.type
 
-  // PDF
+  // PDF — use unpdf which is built for serverless (no DOMMatrix/canvas dependency)
   if (type === 'application/pdf' || name.endsWith('.pdf')) {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const pdfParse = require('pdf-parse')
-    const data = await pdfParse(buffer)
-    if (!data.text.trim())
+    const { extractText } = await import('unpdf')
+    const uint8Array = new Uint8Array(bytes)
+    const { text } = await extractText(uint8Array, { mergePages: true })
+    if (!text.trim())
       return { error: `"${file.name}": No readable text found. If it is a scanned PDF, upload it as an image instead.` }
-    return { text: data.text }
+    return { text }
   }
 
   // Word document (.docx)
