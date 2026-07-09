@@ -165,19 +165,20 @@ function isSubPart(line: string): boolean {
 }
 
 function parseQuestion(line: string): Question {
-  const matchQ = line.match(/^q(\d+)[.):\s]+(.+?)\s*(?:\((\d+)\))?\s*$/i)
-  const matchN = line.match(/^(\d+)[.)]\s+(.+?)\s*(?:\((\d+)\))?\s*$/i)
+  // Marks may be integer or decimal (e.g. "(2)" or "(2.5)")
+  const matchQ = line.match(/^q(\d+)[.):\s]+(.+?)\s*(?:\((\d+(?:\.\d+)?)\s*(?:marks?)?\))?\s*$/i)
+  const matchN = line.match(/^(\d+)[.)]\s+(.+?)\s*(?:\((\d+(?:\.\d+)?)\s*(?:marks?)?\))?\s*$/i)
 
   let number = 1, title = '', marks = 0
 
   if (matchQ) {
     number = parseInt(matchQ[1])
     title = matchQ[2].trim()
-    marks = matchQ[3] ? parseInt(matchQ[3]) : 0
+    marks = matchQ[3] ? parseFloat(matchQ[3]) : 0
   } else if (matchN) {
     number = parseInt(matchN[1])
     title = matchN[2].trim()
-    marks = matchN[3] ? parseInt(matchN[3]) : 0
+    marks = matchN[3] ? parseFloat(matchN[3]) : 0
   }
 
   return { number, title, marks, type: 'plain', subParts: [], tableHeaders: [], tableRows: [] }
