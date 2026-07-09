@@ -2,6 +2,7 @@ import { getUser, getTeachers } from '@/lib/dal'
 import { redirect } from 'next/navigation'
 import AddTeacherForm from '@/components/AddTeacherForm'
 import SchoolProfileForm from '@/components/SchoolLogoForm'
+import PageHeader from '@/components/PageHeader'
 
 export default async function SettingsPage() {
   const user = await getUser()
@@ -10,11 +11,8 @@ export default async function SettingsPage() {
   const teachers = await getTeachers()
 
   return (
-    <div className="p-8 max-w-2xl">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-slate-900">Settings</h1>
-        <p className="text-slate-500 mt-1 text-sm">Manage your school profile and team.</p>
-      </div>
+    <div className="p-6 sm:p-8 max-w-2xl mx-auto">
+      <PageHeader title="Settings" subtitle="Manage your school profile and team." />
 
       {/* School Profile */}
       <section className="bg-white rounded-2xl border border-slate-200 p-6 mb-5 shadow-sm">

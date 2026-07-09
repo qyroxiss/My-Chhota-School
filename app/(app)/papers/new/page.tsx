@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import { getTemplates } from '@/lib/dal'
 import PaperEditor from '@/components/PaperEditor'
-import Link from 'next/link'
+import PageHeader from '@/components/PageHeader'
 
 export default async function NewPaperPage(props: PageProps<'/papers/new'>) {
   const { templateId } = await props.searchParams as { templateId?: string }
@@ -16,18 +16,12 @@ export default async function NewPaperPage(props: PageProps<'/papers/new'>) {
   if (!selectedTemplate) redirect('/templates')
 
   return (
-    <div className="p-8 max-w-3xl">
-      <div className="mb-8">
-        <div className="flex items-center gap-2 text-sm text-slate-500 mb-3">
-          <Link href="/papers" className="hover:text-slate-900 transition-colors">Papers</Link>
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-          </svg>
-          <span className="text-slate-900 font-medium">New Paper</span>
-        </div>
-        <h1 className="text-2xl font-bold text-slate-900">New Paper</h1>
-        <p className="text-slate-500 mt-1 text-sm">Fill in the question content for this paper.</p>
-      </div>
+    <div className="p-6 sm:p-8 max-w-3xl mx-auto">
+      <PageHeader
+        title="New Paper"
+        subtitle="Fill in the question content for this paper."
+        crumbs={[{ label: 'Papers', href: '/papers' }, { label: 'New Paper' }]}
+      />
 
       {/* Template selector */}
       {templates.length > 1 && (
