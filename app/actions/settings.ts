@@ -37,17 +37,17 @@ export async function updateSchoolProfile(state: { error?: string; success?: str
 
   const name = formData.get('name') as string
   const address = formData.get('address') as string
-  const logoUrl = formData.get('logoUrl') as string
+  const logo = formData.get('logo') as string // data URI (uploaded) or empty
 
   if (!name?.trim()) return { error: 'School name is required.' }
 
   await supabase.from('School').update({
     name: name.trim(),
     address: address?.trim() || null,
-    logo: logoUrl?.trim() || null,
+    logo: logo?.trim() || null,
   }).eq('id', session.schoolId)
 
-  revalidatePath('/settings')
-  revalidatePath('/papers')
+  // Logo/name appear on every paper — clear all cached pages
+  revalidatePath('/', 'layout')
   return { success: 'School profile updated.' }
 }

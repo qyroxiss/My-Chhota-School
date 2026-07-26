@@ -34,16 +34,22 @@ export default async function PaperPreviewPage(props: PageProps<'/papers/[id]/pr
       {/* Paper body */}
       <div className="paper-body max-w-3xl mx-auto my-8 bg-white p-12 shadow-sm rounded-2xl">
 
-        {/* School header */}
-        <div className="text-center mb-7 pb-5 border-b-2 border-slate-800">
+        {/* School header — logo in the left corner, name/address centered */}
+        <div className="relative flex items-center gap-4 mb-7 pb-5 border-b-2 border-slate-800 min-h-[64px]">
           {paper.school.logo && (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={paper.school.logo} alt="School logo" className="h-14 mx-auto mb-2 object-contain" />
+            <img
+              src={paper.school.logo}
+              alt="School logo"
+              className="h-16 w-16 object-contain shrink-0 absolute left-0 top-1/2 -translate-y-1/2"
+            />
           )}
-          <h2 className="text-xl font-bold text-slate-900 uppercase tracking-wide">{paper.school.name}</h2>
-          {paper.school.address && (
-            <p className="text-sm text-slate-500 mt-0.5">{paper.school.address}</p>
-          )}
+          <div className="flex-1 text-center px-16">
+            <h2 className="text-xl font-bold text-slate-900 uppercase tracking-wide">{paper.school.name}</h2>
+            {paper.school.address && (
+              <p className="text-sm text-slate-500 mt-0.5">{paper.school.address}</p>
+            )}
+          </div>
         </div>
 
         {/* Paper meta — for single-subject papers, or the overall header for multi-subject */}
