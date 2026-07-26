@@ -91,8 +91,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </div>
       </aside>
 
-      {/* Main — offset by sidebar width */}
-      <main className="ml-64 min-w-0 min-h-screen">{children}</main>
+      {/* Main — offset by sidebar width (offset removed when printing) */}
+      <main className="ml-64 print:ml-0 min-w-0 min-h-screen">{children}</main>
     </div>
   )
 }

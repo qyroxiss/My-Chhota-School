@@ -27,9 +27,14 @@ input, textarea, select {
     margin: 0;
   }
 
+  /* Remove the sidebar layout offset so the paper isn't pushed right */
+  main {
+    margin-left: 0 !important;
+  }
+
   .paper-body {
     max-width: 100% !important;
-    margin: 0 !important;
+    margin: 0 auto !important;
     padding: 0 !important;
     box-shadow: none !important;
     border-radius: 0 !important;
