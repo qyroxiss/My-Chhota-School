@@ -41,7 +41,7 @@ function addLineBreaks(raw: string): string {
   return t.replace(/\n{3,}/g, '\n\n').trim()
 }
 
-async function extractSingleFile(file: File): Promise<{ text?: string; error?: string }> {
+async function extractSingleFile(file: File, deadline: number): Promise<{ text?: string; error?: string }> {
   const bytes = await file.arrayBuffer()
   const buffer = Buffer.from(bytes)
   const name = file.name.toLowerCase()
@@ -74,11 +74,37 @@ async function extractSingleFile(file: File): Promise<{ text?: string; error?: s
   // unlike bundled OCR which is slow/unreliable and hangs on serverless).
   if (type.startsWith('image/') || /\.(jpg|jpeg|png|bmp|webp)$/.test(name)) {
     const mime = type && type.startsWith('image/') ? type : guessMime(name)
-    const dataUrl = `data:${mime};base64,${buffer.toString('base64')}`
-    return await ocrImageViaVision(dataUrl, file.name)
+    const dataUrl = await toCompactDataUrl(buffer, mime)
+    return await ocrImageViaVision(dataUrl, file.name, deadline)
   }
 
   return { error: `"${file.name}": Unsupported file type. Use PDF, .docx, JPG, or PNG.` }
+}
+
+// Downscale a photo before sending it to the vision model. Multi-MB phone/HDR
+// photos otherwise make the API slow enough to hit the timeout and cascade
+// through every fallback model (minutes per image). ~1600px JPEG keeps text
+// legible while cutting the payload ~10-20x. Falls back to the original on error.
+async function toCompactDataUrl(buffer: Buffer, mime: string): Promise<string> {
+  const MAX = 1600
+  try {
+    const { loadImage, createCanvas } = await import('@napi-rs/canvas')
+    const img = await loadImage(buffer)
+    const longest = Math.max(img.width, img.height)
+    if (longest <= MAX && buffer.length < 900_000) {
+      return `data:${mime};base64,${buffer.toString('base64')}`
+    }
+    const scale = Math.min(1, MAX / longest)
+    const w = Math.max(1, Math.round(img.width * scale))
+    const h = Math.max(1, Math.round(img.height * scale))
+    const canvas = createCanvas(w, h)
+    const ctx = canvas.getContext('2d')
+    ctx.drawImage(img, 0, 0, w, h)
+    const out = await canvas.encode('jpeg', 80)
+    return `data:image/jpeg;base64,${out.toString('base64')}`
+  } catch {
+    return `data:${mime};base64,${buffer.toString('base64')}`
+  }
 }
 
 function guessMime(name: string): string {
@@ -90,13 +116,23 @@ function guessMime(name: string): string {
 
 // Transcribe an image using a free OpenRouter vision model, with a per-request
 // timeout and a fallback chain so it never hangs and survives rate limits.
+// Real vision-language models only. NOT `openrouter/free` — its auto-router
+// sometimes lands on a content-safety classifier that returns "User Safety: safe"
+// instead of the page text. These are ordered fastest-first (measured 1-6s each).
 const VISION_MODELS = [
   'nvidia/nemotron-nano-12b-v2-vl:free',
-  'openrouter/free',
-  'google/gemma-4-31b-it:free',
+  'google/gemma-4-26b-a4b-it:free',
 ]
 
-async function ocrImageViaVision(dataUrl: string, filename: string): Promise<{ text?: string; error?: string }> {
+const PER_REQUEST_MS = 30_000 // hard cap per model call
+const OVERALL_DEADLINE_MS = 100_000 // whole extraction can never exceed this
+
+// A response that is a safety verdict or too short to be a page is not OCR.
+function looksLikeJunkOcr(text: string): boolean {
+  return text.length < 15 || /user safety|^\W*(un)?safe\b|content is (un)?safe/i.test(text)
+}
+
+async function ocrImageViaVision(dataUrl: string, filename: string, deadline: number): Promise<{ text?: string; error?: string }> {
   const apiKey = process.env.OPENROUTER_API_KEY
   if (!apiKey)
     return { error: `"${filename}": Reading photos needs OPENROUTER_API_KEY in .env (free key at openrouter.ai/keys).` }
@@ -121,8 +157,10 @@ async function ocrImageViaVision(dataUrl: string, filename: string): Promise<{ t
   let lastError = 'request failed'
 
   for (const model of models) {
+    const remaining = deadline - Date.now()
+    if (remaining <= 1000) { lastError = 'time budget exhausted'; break }
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 60_000) // 60s hard cap
+    const timeout = setTimeout(() => controller.abort(), Math.min(PER_REQUEST_MS, remaining))
     try {
       const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
@@ -140,9 +178,9 @@ async function ocrImageViaVision(dataUrl: string, filename: string): Promise<{ t
       if (res.ok) {
         const data = await res.json()
         const text: string = (data?.choices?.[0]?.message?.content ?? '').trim()
-        if (text) return { text }
-        lastError = 'empty response'
-        continue
+        if (text && !looksLikeJunkOcr(text)) return { text }
+        lastError = text ? `non-OCR response ("${text.slice(0, 30)}")` : 'empty response'
+        continue // try the next model
       }
       if (res.status === 401) return { error: `"${filename}": AI key rejected (401). Check OPENROUTER_API_KEY.` }
       const detail = await res.text().catch(() => '')
@@ -151,12 +189,12 @@ async function ocrImageViaVision(dataUrl: string, filename: string): Promise<{ t
       return { error: `"${filename}": image read failed ${lastError}` }
     } catch (err: any) {
       clearTimeout(timeout)
-      lastError = err.name === 'AbortError' ? 'timed out after 60s' : err.message
+      lastError = err.name === 'AbortError' ? 'timed out' : err.message
       continue
     }
   }
 
-  return { error: `"${filename}": could not read the image (${lastError}). Try a clearer, flatter photo.` }
+  return { error: `"${filename}": could not read the image (${lastError}). The free AI vision service may be busy — try again in a minute, upload fewer images, or type the chapter into the "Generate with AI" tab instead.` }
 }
 
 export async function extractTextFromFile(
@@ -166,19 +204,31 @@ export async function extractTextFromFile(
   const valid = files.filter(f => f && f.name)
   if (!valid.length) return { error: 'No files provided.' }
 
-  const parts: string[] = []
-  const errors: string[] = []
+  // Whole operation is bounded so it can never hang (e.g. when the free vision
+  // service is throttled). Files are processed with limited concurrency.
+  const deadline = Date.now() + OVERALL_DEADLINE_MS
+  const CONCURRENCY = 3
+  const results: { text?: string; error?: string }[] = new Array(valid.length)
 
-  for (const file of valid) {
-    try {
-      const result = await extractSingleFile(file)
-      if (result.text) parts.push(result.text.trim())
-      else if (result.error) errors.push(result.error)
-    } catch (err: any) {
-      errors.push(`"${file.name}": ${err.message}`)
+  let next = 0
+  async function worker() {
+    while (next < valid.length) {
+      const i = next++
+      const file = valid[i]
+      try {
+        results[i] = await extractSingleFile(file, deadline)
+      } catch (err: any) {
+        results[i] = { error: `"${file.name}": ${err.message}` }
+      }
     }
   }
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, valid.length) }, worker))
+
+  const parts = results.filter(r => r?.text).map(r => r!.text!.trim())
+  const errors = results.filter(r => r?.error).map(r => r!.error!)
 
   if (!parts.length) return { error: errors.join(' | ') || 'No text could be extracted.' }
+  // Some succeeded, some failed — return what we got but note the failures.
+  if (errors.length) return { text: parts.join('\n\n'), error: `Some files could not be read: ${errors.length}` }
   return { text: parts.join('\n\n') }
 }

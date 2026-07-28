@@ -15,6 +15,46 @@ const Q_TYPES = ['MCQ', 'Short Answer', 'Long Answer', 'Fill in the Blanks', 'Tr
 const FIELD = 'w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all'
 const FIELD_SM = 'w-full px-3 py-2 border border-slate-200 rounded-xl text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all'
 
+// Downscale an image File in the browser before upload so multi-MB photos become
+// small, fast payloads (and never exceed the request-body limit). Non-images pass through.
+async function compressImageFile(file: File, maxDim = 1600, quality = 0.8): Promise<File> {
+  if (!file.type.startsWith('image/')) return file
+  try {
+    const dataUrl: string = await new Promise((res, rej) => {
+      const r = new FileReader()
+      r.onload = () => res(r.result as string)
+      r.onerror = () => rej(new Error('read failed'))
+      r.readAsDataURL(file)
+    })
+    const img: HTMLImageElement = await new Promise((res, rej) => {
+      const i = new Image()
+      i.onload = () => res(i)
+      i.onerror = () => rej(new Error('decode failed'))
+      i.src = dataUrl
+    })
+    const longest = Math.max(img.width, img.height)
+    if (longest <= maxDim && file.size < 900_000) return file
+    const scale = Math.min(1, maxDim / longest)
+    const w = Math.max(1, Math.round(img.width * scale))
+    const h = Math.max(1, Math.round(img.height * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = w
+    canvas.height = h
+    canvas.getContext('2d')?.drawImage(img, 0, 0, w, h)
+    const blob: Blob | null = await new Promise(res => canvas.toBlob(res, 'image/jpeg', quality))
+    if (!blob) return file
+    return new File([blob], file.name.replace(/\.\w+$/, '.jpg'), { type: 'image/jpeg' })
+  } catch {
+    return file // fall back to the original on any failure
+  }
+}
+
+async function buildUploadForm(files: File[]): Promise<FormData> {
+  const fd = new FormData()
+  for (const file of files) fd.append('file', await compressImageFile(file))
+  return fd
+}
+
 export default function NewTemplatePage() {
   const [state, action, pending] = useActionState(createTemplate, undefined)
   const [preview, setPreview] = useState<ParsedPaper | null>(null)
@@ -38,6 +78,8 @@ export default function NewTemplatePage() {
   const [aiFiles, setAiFiles] = useState<File[]>([])
   const [aiGenerating, setAiGenerating] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
+  // Text carried over from an extraction to use as AI grounding (avoids re-OCR)
+  const [aiGroundingText, setAiGroundingText] = useState('')
   const aiFileRef = useRef<HTMLInputElement>(null)
 
   const totalMarks = specs.reduce((sum, s) => sum + (s.count || 0) * (s.marksPerQ || 0), 0)
@@ -67,13 +109,17 @@ export default function NewTemplatePage() {
     setExtracting(true)
     setExtractError(null)
     setExtractProgress(`Extracting ${selectedFiles.length} file${selectedFiles.length > 1 ? 's' : ''}…`)
-    const fd = new FormData()
-    for (const file of selectedFiles) fd.append('file', file)
+    const fd = await buildUploadForm(selectedFiles)
     const result = await extractTextFromFile(fd)
     setExtracting(false)
     setExtractProgress('')
-    if (result.error) setExtractError(result.error)
-    else if (result.text) { handleTextChange(result.text); setTab('paste') }
+    if (result.text) {
+      handleTextChange(result.text)
+      setTab('paste')
+      setExtractError(result.error ? `Note: ${result.error}` : null)
+    } else {
+      setExtractError(result.error || 'Could not extract any text.')
+    }
   }
 
   // ── AI generation handlers ──
@@ -95,18 +141,17 @@ export default function NewTemplatePage() {
     setAiGenerating(true)
     setAiError(null)
 
-    // Optional: extract grounding text from an uploaded PDF/doc first
-    let groundingText = ''
+    // Grounding: reuse text carried over from an extraction, or read uploaded files now.
+    // Grounding is optional — if reading the photo fails, we still generate from the
+    // typed Subject/Chapter rather than blocking the user.
+    let groundingText = aiGroundingText.trim()
     if (aiFiles.length) {
-      const fd = new FormData()
-      for (const f of aiFiles) fd.append('file', f)
+      const fd = await buildUploadForm(aiFiles)
       const ext = await extractTextFromFile(fd)
-      if (ext.error) {
-        setAiGenerating(false)
-        setAiError(`Could not read the uploaded file: ${ext.error}`)
-        return
+      if (ext.text) groundingText = [groundingText, ext.text].filter(Boolean).join('\n\n')
+      else if (ext.error && !groundingText) {
+        setAiError(`Couldn't read the photo (${ext.error}). Generating from the chapter name instead.`)
       }
-      groundingText = ext.text ?? ''
     }
 
     const result = await generateQuestionPaper({
@@ -190,6 +235,19 @@ export default function NewTemplatePage() {
                   placeholder="e.g. Chapter 3: Plants and Animals; Photosynthesis; Food chains"
                   className={`${FIELD} resize-none`} />
               </Field>
+
+              {/* Grounding carried over from an extraction */}
+              {aiGroundingText.trim() && (
+                <div className="flex items-start gap-2 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
+                  <svg className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <p className="text-xs text-emerald-800 flex-1">
+                    Chapter content attached ({Math.round(aiGroundingText.trim().length / 100) / 10}k chars) — questions will be based on it.
+                    <button type="button" onClick={() => setAiGroundingText('')} className="ml-2 font-semibold underline hover:no-underline">Remove</button>
+                  </p>
+                </div>
+              )}
 
               {/* Optional PDF grounding */}
               <div>
@@ -359,6 +417,33 @@ export default function NewTemplatePage() {
                 </div>
               ))}
               {preview.questions.length > 8 && <p className="text-xs text-indigo-500 pl-7">+{preview.questions.length - 8} more questions</p>}
+            </div>
+          </div>
+        )}
+
+        {/* No questions found — this is study material, not a paper. Offer AI generation. */}
+        {preview && preview.questions.length === 0 && rawText.trim().length > 40 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5">
+            <div className="flex items-start gap-3">
+              <svg className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-amber-900">No questions found in this content</p>
+                <p className="text-sm text-amber-700 mt-0.5">
+                  This looks like study material (a lesson or chapter), not a ready-made question paper. Let the AI create questions from it.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => { setAiGroundingText(rawText); setTab('ai') }}
+                  className="mt-3 inline-flex items-center gap-2 bg-gradient-to-r from-indigo-600 to-violet-600 hover:brightness-110 text-white px-4 py-2 rounded-xl text-sm font-semibold transition-all shadow-sm shadow-indigo-600/20"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                  </svg>
+                  Generate questions from this
+                </button>
+              </div>
             </div>
           </div>
         )}
