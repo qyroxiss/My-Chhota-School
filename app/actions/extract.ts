@@ -70,19 +70,93 @@ async function extractSingleFile(file: File): Promise<{ text?: string; error?: s
     return { text: result.value }
   }
 
-  // Image (JPG, PNG, BMP, WEBP)
+  // Image (JPG, PNG, BMP, WEBP) — read with a vision model (reliable on photos,
+  // unlike bundled OCR which is slow/unreliable and hangs on serverless).
   if (type.startsWith('image/') || /\.(jpg|jpeg|png|bmp|webp)$/.test(name)) {
-    const { createWorker } = await import('tesseract.js')
-    // eng+hin covers English and Hindi (Devanagari) text
-    const worker = await createWorker('eng+hin', 1, { cachePath: '/tmp' })
-    const { data: { text } } = await worker.recognize(buffer)
-    await worker.terminate()
-    if (!text.trim())
-      return { error: `"${file.name}": Could not read text from image. Ensure the photo is clear and well-lit.` }
-    return { text }
+    const mime = type && type.startsWith('image/') ? type : guessMime(name)
+    const dataUrl = `data:${mime};base64,${buffer.toString('base64')}`
+    return await ocrImageViaVision(dataUrl, file.name)
   }
 
   return { error: `"${file.name}": Unsupported file type. Use PDF, .docx, JPG, or PNG.` }
+}
+
+function guessMime(name: string): string {
+  if (name.endsWith('.png')) return 'image/png'
+  if (name.endsWith('.webp')) return 'image/webp'
+  if (name.endsWith('.bmp')) return 'image/bmp'
+  return 'image/jpeg'
+}
+
+// Transcribe an image using a free OpenRouter vision model, with a per-request
+// timeout and a fallback chain so it never hangs and survives rate limits.
+const VISION_MODELS = [
+  'nvidia/nemotron-nano-12b-v2-vl:free',
+  'openrouter/free',
+  'google/gemma-4-31b-it:free',
+]
+
+async function ocrImageViaVision(dataUrl: string, filename: string): Promise<{ text?: string; error?: string }> {
+  const apiKey = process.env.OPENROUTER_API_KEY
+  if (!apiKey)
+    return { error: `"${filename}": Reading photos needs OPENROUTER_API_KEY in .env (free key at openrouter.ai/keys).` }
+
+  const messages = [
+    {
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text:
+            'You are an OCR engine. Transcribe ALL readable text from this page image exactly as written, ' +
+            'preserving reading order, headings, question numbers, options, and lists. ' +
+            'Output plain text only — no commentary, no markdown.',
+        },
+        { type: 'image_url', image_url: { url: dataUrl } },
+      ],
+    },
+  ]
+
+  const models = process.env.OPENROUTER_VISION_MODEL ? [process.env.OPENROUTER_VISION_MODEL] : VISION_MODELS
+  let lastError = 'request failed'
+
+  for (const model of models) {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 60_000) // 60s hard cap
+    try {
+      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://my-chhota-school.vercel.app',
+          'X-Title': 'My Chhota School - Image OCR',
+        },
+        body: JSON.stringify({ model, temperature: 0, messages }),
+        signal: controller.signal,
+      })
+      clearTimeout(timeout)
+
+      if (res.ok) {
+        const data = await res.json()
+        const text: string = (data?.choices?.[0]?.message?.content ?? '').trim()
+        if (text) return { text }
+        lastError = 'empty response'
+        continue
+      }
+      if (res.status === 401) return { error: `"${filename}": AI key rejected (401). Check OPENROUTER_API_KEY.` }
+      const detail = await res.text().catch(() => '')
+      lastError = `(${res.status}) ${detail.slice(0, 140)}`
+      if (res.status === 404 || res.status === 429) continue
+      return { error: `"${filename}": image read failed ${lastError}` }
+    } catch (err: any) {
+      clearTimeout(timeout)
+      lastError = err.name === 'AbortError' ? 'timed out after 60s' : err.message
+      continue
+    }
+  }
+
+  return { error: `"${filename}": could not read the image (${lastError}). Try a clearer, flatter photo.` }
 }
 
 export async function extractTextFromFile(
