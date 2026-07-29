@@ -55,6 +55,22 @@ async function buildUploadForm(files: File[]): Promise<FormData> {
   return fd
 }
 
+// extractTextFromFile can reject (dropped connection, platform function timeout) rather than
+// resolving with an { error } result — without a catch here, that leaves the caller's loading
+// state stuck forever. This wrapper guarantees a resolved result within timeoutMs.
+async function safeExtract(
+  fd: FormData, timeoutMs = 50_000
+): Promise<{ text?: string; error?: string; chapters?: ChapterSegment[] }> {
+  try {
+    return await Promise.race([
+      extractTextFromFile(fd),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timed out')), timeoutMs)),
+    ])
+  } catch (err: any) {
+    return { error: `Could not read the file${err?.message ? ` (${err.message})` : ''}. Check your connection and try again.` }
+  }
+}
+
 export default function NewTemplatePage() {
   const [state, action, pending] = useActionState(createTemplate, undefined)
   const [preview, setPreview] = useState<ParsedPaper | null>(null)
@@ -121,10 +137,14 @@ export default function NewTemplatePage() {
       ? setTimeout(() => setExtractProgress('Reading photo… can take up to 45s'), 5000)
       : null
     const fd = await buildUploadForm(selectedFiles)
-    const result = await extractTextFromFile(fd)
-    if (slowNotice) clearTimeout(slowNotice)
-    setExtracting(false)
-    setExtractProgress('')
+    let result: { text?: string; error?: string; chapters?: ChapterSegment[] }
+    try {
+      result = await safeExtract(fd)
+    } finally {
+      if (slowNotice) clearTimeout(slowNotice)
+      setExtracting(false)
+      setExtractProgress('')
+    }
     if (result.text) {
       setFullExtractedText(result.text)
       if (result.chapters && result.chapters.length > 1) {
@@ -172,33 +192,38 @@ export default function NewTemplatePage() {
     setAiGenerating(true)
     setAiError(null)
 
-    // Grounding: reuse text carried over from an extraction, or read uploaded files now.
-    // Grounding is optional — if reading the photo fails, we still generate from the
-    // typed Subject/Chapter rather than blocking the user.
-    let groundingText = aiGroundingText.trim()
-    if (aiFiles.length) {
-      const fd = await buildUploadForm(aiFiles)
-      const ext = await extractTextFromFile(fd)
-      if (ext.text) groundingText = [groundingText, ext.text].filter(Boolean).join('\n\n')
-      else if (ext.error && !groundingText) {
-        setAiError(`Couldn't read the photo (${ext.error}). Generating from the chapter name instead.`)
+    try {
+      // Grounding: reuse text carried over from an extraction, or read uploaded files now.
+      // Grounding is optional — if reading the photo fails, we still generate from the
+      // typed Subject/Chapter rather than blocking the user.
+      let groundingText = aiGroundingText.trim()
+      if (aiFiles.length) {
+        const fd = await buildUploadForm(aiFiles)
+        const ext = await safeExtract(fd)
+        if (ext.text) groundingText = [groundingText, ext.text].filter(Boolean).join('\n\n')
+        else if (ext.error && !groundingText) {
+          setAiError(`Couldn't read the photo (${ext.error}). Generating from the chapter name instead.`)
+        }
       }
+
+      const result = await generateQuestionPaper({
+        standard: aiStandard,
+        subject: aiSubject,
+        book: aiBook,
+        chapters: aiChapters,
+        totalMarks,
+        duration: aiDuration,
+        specs,
+        groundingText,
+      })
+
+      if (result.error) { setAiError(result.error); return }
+      if (result.text) { handleTextChange(result.text); setTab('paste') }
+    } catch (err: any) {
+      setAiError(`Generation failed${err?.message ? ` (${err.message})` : ''}. Please try again.`)
+    } finally {
+      setAiGenerating(false)
     }
-
-    const result = await generateQuestionPaper({
-      standard: aiStandard,
-      subject: aiSubject,
-      book: aiBook,
-      chapters: aiChapters,
-      totalMarks,
-      duration: aiDuration,
-      specs,
-      groundingText,
-    })
-    setAiGenerating(false)
-
-    if (result.error) { setAiError(result.error); return }
-    if (result.text) { handleTextChange(result.text); setTab('paste') }
   }
 
   return (

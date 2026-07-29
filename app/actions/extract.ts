@@ -41,6 +41,61 @@ function addLineBreaks(raw: string): string {
   return t.replace(/\n{3,}/g, '\n\n').trim()
 }
 
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function longestCommonSuffix(a: string, b: string): string {
+  let i = 0
+  while (i < a.length && i < b.length && a[a.length - 1 - i] === b[b.length - 1 - i]) i++
+  return a.slice(a.length - i)
+}
+
+function longestCommonPrefix(a: string, b: string): string {
+  let i = 0
+  while (i < a.length && i < b.length && a[i] === b[i]) i++
+  return a.slice(0, i)
+}
+
+// Finds a footer/header string that repeats across most pages, by comparing each
+// consecutive pair and voting on the most common shared fragment. Works for any
+// book (not hardcoded to a specific title/year) since it's frequency-based.
+function detectRepeatedFragment(pages: string[], mode: 'prefix' | 'suffix'): string {
+  const votes = new Map<string, number>()
+  for (let i = 0; i + 1 < pages.length; i++) {
+    const a = mode === 'prefix' ? pages[i].trimStart().replace(/^\d{1,4}/, '') : pages[i].trimEnd()
+    const b = mode === 'prefix' ? pages[i + 1].trimStart().replace(/^\d{1,4}/, '') : pages[i + 1].trimEnd()
+    const shared = (mode === 'prefix' ? longestCommonPrefix(a, b) : longestCommonSuffix(a, b)).trim()
+    if (shared.length >= 4 && shared.length <= 60) votes.set(shared, (votes.get(shared) || 0) + 1)
+  }
+  let best = ''
+  let bestCount = 0
+  for (const [candidate, count] of votes) if (count > bestCount) { best = candidate; bestCount = count }
+  const threshold = Math.max(2, Math.floor((pages.length - 1) * 0.4))
+  return bestCount >= threshold ? best : ''
+}
+
+// PDF extractors return one flat string per page with no separators, so a running
+// header/footer (page number + book title, "Reprint 2026-27", etc.) ends up glued
+// directly onto the real content at every page boundary. Detect and strip it.
+function stripRunningHeaderFooter(pages: string[]): string[] {
+  if (pages.length < 4) return pages
+  const footer = detectRepeatedFragment(pages, 'suffix')
+  const header = detectRepeatedFragment(pages, 'prefix')
+  if (!footer && !header) return pages
+
+  const footerRe = footer ? new RegExp(escapeRegExp(footer), 'g') : null
+  // Require a leading page number so a book title that's genuinely mentioned in
+  // body text (with no digit glued in front) is left alone.
+  const headerRe = header ? new RegExp(`\\d{1,4}${escapeRegExp(header)}`, 'g') : null
+  return pages.map(p => {
+    let t = p
+    if (footerRe) t = t.replace(footerRe, ' ')
+    if (headerRe) t = t.replace(headerRe, ' ')
+    return t
+  })
+}
+
 export type ChapterSegment = { title: string; text: string }
 
 // Splits fully-extracted text into chapters when the upload looks like a whole
@@ -72,8 +127,9 @@ async function extractSingleFile(file: File, deadline: number): Promise<{ text?:
   if (type === 'application/pdf' || name.endsWith('.pdf')) {
     const { extractText } = await import('unpdf')
     const uint8Array = new Uint8Array(bytes)
-    const { text: pages } = await extractText(uint8Array)
-    const raw = (pages as string[]).join('\n\n')
+    const { text: rawPages } = await extractText(uint8Array)
+    const pages = stripRunningHeaderFooter(rawPages as string[])
+    const raw = pages.join('\n\n')
     if (!raw.trim())
       return { error: `"${file.name}": No readable text found. If it is a scanned PDF, upload it as an image instead.` }
     return { text: addLineBreaks(raw) }
@@ -245,7 +301,7 @@ export async function extractTextFromFile(
   // Whole operation is bounded so it can never hang (e.g. when the free vision
   // service is throttled). Files are processed with limited concurrency.
   const deadline = Date.now() + OVERALL_DEADLINE_MS
-  const CONCURRENCY = 3
+  const CONCURRENCY = Math.min(valid.length, 6)
   const results: { text?: string; error?: string }[] = new Array(valid.length)
 
   let next = 0
