@@ -80,7 +80,7 @@ export async function generateQuestionPaper(
     .join('\n')
 
   const grounding = input.groundingText?.trim()
-    ? `\n\nBase the questions STRICTLY on the following textbook content. Do not invent facts beyond it:\n"""\n${input.groundingText.slice(0, 12000)}\n"""`
+    ? `\n\nBase the questions STRICTLY on the following textbook content. Do not invent facts beyond it:\n"""\n${input.groundingText.slice(0, 24000)}\n"""`
     : ''
 
   const userPrompt = `Create a school exam question paper.

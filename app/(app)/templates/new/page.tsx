@@ -2,7 +2,7 @@
 import { useActionState, useState, useRef } from 'react'
 import Link from 'next/link'
 import { createTemplate } from '@/app/actions/templates'
-import { extractTextFromFile } from '@/app/actions/extract'
+import { extractTextFromFile, type ChapterSegment } from '@/app/actions/extract'
 import { generateQuestionPaper, type QuestionSpec } from '@/app/actions/ai'
 import { parsePaper } from '@/lib/parser'
 import type { ParsedPaper } from '@/lib/definitions'
@@ -64,6 +64,8 @@ export default function NewTemplatePage() {
   const [extractError, setExtractError] = useState<string | null>(null)
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
   const [extractProgress, setExtractProgress] = useState('')
+  const [detectedChapters, setDetectedChapters] = useState<ChapterSegment[] | null>(null)
+  const [fullExtractedText, setFullExtractedText] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
 
   // ── AI generator state ──
@@ -97,29 +99,58 @@ export default function NewTemplatePage() {
     const files = Array.from(e.target.files ?? [])
     setSelectedFiles(files)
     setExtractError(null)
+    setDetectedChapters(null)
   }
 
   function removeFile(index: number) {
     setSelectedFiles(selectedFiles.filter((_, i) => i !== index))
     if (fileRef.current) fileRef.current.value = ''
+    setDetectedChapters(null)
   }
 
   async function handleExtract() {
     if (!selectedFiles.length) return
     setExtracting(true)
     setExtractError(null)
+    setDetectedChapters(null)
     setExtractProgress(`Extracting ${selectedFiles.length} file${selectedFiles.length > 1 ? 's' : ''}…`)
+    // Photo OCR round-trips to a vision model and can take a while — let the
+    // user know it's still working rather than looking stuck.
+    const hasPhoto = selectedFiles.some(f => f.type.startsWith('image/'))
+    const slowNotice = hasPhoto
+      ? setTimeout(() => setExtractProgress('Reading photo… can take up to 45s'), 5000)
+      : null
     const fd = await buildUploadForm(selectedFiles)
     const result = await extractTextFromFile(fd)
+    if (slowNotice) clearTimeout(slowNotice)
     setExtracting(false)
     setExtractProgress('')
     if (result.text) {
-      handleTextChange(result.text)
-      setTab('paste')
-      setExtractError(result.error ? `Note: ${result.error}` : null)
+      setFullExtractedText(result.text)
+      if (result.chapters && result.chapters.length > 1) {
+        setDetectedChapters(result.chapters)
+        setExtractError(result.error ? `Note: ${result.error}` : null)
+      } else {
+        handleTextChange(result.text)
+        setTab('paste')
+        setExtractError(result.error ? `Note: ${result.error}` : null)
+      }
     } else {
       setExtractError(result.error || 'Could not extract any text.')
     }
+  }
+
+  function selectChapter(chapter: ChapterSegment) {
+    handleTextChange(chapter.text)
+    if (!aiChapters.trim()) setAiChapters(chapter.title)
+    setDetectedChapters(null)
+    setTab('paste')
+  }
+
+  function useWholeDocument() {
+    handleTextChange(fullExtractedText)
+    setDetectedChapters(null)
+    setTab('paste')
   }
 
   // ── AI generation handlers ──
@@ -370,6 +401,27 @@ export default function NewTemplatePage() {
                       </button>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {detectedChapters && (
+                <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-5 space-y-3">
+                  <div>
+                    <p className="text-sm font-semibold text-indigo-900">This looks like a whole book — pick a chapter</p>
+                    <p className="text-xs text-indigo-700 mt-0.5">We found {detectedChapters.length} chapters. Questions will be based only on the one you pick.</p>
+                  </div>
+                  <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+                    {detectedChapters.map((ch, i) => (
+                      <button key={i} type="button" onClick={() => selectChapter(ch)}
+                        className="w-full text-left bg-white border border-indigo-200 hover:border-indigo-400 hover:bg-indigo-50 rounded-xl px-4 py-2.5 text-sm text-slate-700 font-medium transition-colors">
+                        {ch.title}
+                      </button>
+                    ))}
+                  </div>
+                  <button type="button" onClick={useWholeDocument}
+                    className="text-xs font-semibold text-indigo-600 underline hover:no-underline">
+                    Use the entire document instead
+                  </button>
                 </div>
               )}
 

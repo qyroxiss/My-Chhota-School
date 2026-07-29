@@ -41,6 +41,26 @@ function addLineBreaks(raw: string): string {
   return t.replace(/\n{3,}/g, '\n\n').trim()
 }
 
+export type ChapterSegment = { title: string; text: string }
+
+// Splits fully-extracted text into chapters when the upload looks like a whole
+// textbook rather than a single worksheet/paper. Requires at least 2 headings
+// and enough overall length, so a paper that just mentions "Chapter 3" once
+// doesn't wrongly trigger a chapter picker.
+const CHAPTER_HEADING_RE = /^[ \t]*(chapter|unit)\s+([0-9]+|[ivxlcdm]+)\b[^\n]*$/gim
+
+function detectChapters(text: string): ChapterSegment[] | undefined {
+  if (text.length < 3000) return undefined
+  const matches = [...text.matchAll(CHAPTER_HEADING_RE)]
+  if (matches.length < 2) return undefined
+
+  return matches.map((m, i) => {
+    const start = m.index!
+    const end = i + 1 < matches.length ? matches[i + 1].index! : text.length
+    return { title: m[0].trim(), text: text.slice(start, end).trim() }
+  })
+}
+
 async function extractSingleFile(file: File, deadline: number): Promise<{ text?: string; error?: string }> {
   const bytes = await file.arrayBuffer()
   const buffer = Buffer.from(bytes)
@@ -124,18 +144,61 @@ const VISION_MODELS = [
   'google/gemma-4-26b-a4b-it:free',
 ]
 
-const PER_REQUEST_MS = 30_000 // hard cap per model call
-const OVERALL_DEADLINE_MS = 100_000 // whole extraction can never exceed this
+const PER_REQUEST_MS = 15_000 // hard cap per model call — these models measure 1-6s normally
+const OVERALL_DEADLINE_MS = 45_000 // whole extraction can never exceed this
 
 // A response that is a safety verdict or too short to be a page is not OCR.
 function looksLikeJunkOcr(text: string): boolean {
   return text.length < 15 || /user safety|^\W*(un)?safe\b|content is (un)?safe/i.test(text)
 }
 
+type ModelAttempt = { text?: string; authRejected?: boolean; error: string }
+
+async function callVisionModel(
+  model: string, apiKey: string, messages: any[], timeoutMs: number
+): Promise<ModelAttempt> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://my-chhota-school.vercel.app',
+        'X-Title': 'My Chhota School - Image OCR',
+      },
+      body: JSON.stringify({ model, temperature: 0, messages }),
+      signal: controller.signal,
+    })
+    clearTimeout(timeout)
+
+    if (res.ok) {
+      const data = await res.json()
+      const text: string = (data?.choices?.[0]?.message?.content ?? '').trim()
+      if (text && !looksLikeJunkOcr(text)) return { text, error: '' }
+      return { error: text ? `non-OCR response ("${text.slice(0, 30)}")` : 'empty response' }
+    }
+    if (res.status === 401) return { authRejected: true, error: '401 key rejected' }
+    const detail = await res.text().catch(() => '')
+    return { error: `(${res.status}) ${detail.slice(0, 140)}` }
+  } catch (err: any) {
+    clearTimeout(timeout)
+    return { error: err.name === 'AbortError' ? 'timed out' : err.message }
+  }
+}
+
+// Races all configured vision models at once instead of trying them one at a
+// time — a hung/slow model no longer blocks the fallback from starting, which
+// roughly halves worst-case latency versus a sequential chain.
 async function ocrImageViaVision(dataUrl: string, filename: string, deadline: number): Promise<{ text?: string; error?: string }> {
   const apiKey = process.env.OPENROUTER_API_KEY
   if (!apiKey)
     return { error: `"${filename}": Reading photos needs OPENROUTER_API_KEY in .env (free key at openrouter.ai/keys).` }
+
+  const remaining = deadline - Date.now()
+  if (remaining <= 1000)
+    return { error: `"${filename}": could not read the image (time budget exhausted). Try again in a minute, upload fewer images, or type the chapter into the "Generate with AI" tab instead.` }
 
   const messages = [
     {
@@ -154,52 +217,27 @@ async function ocrImageViaVision(dataUrl: string, filename: string, deadline: nu
   ]
 
   const models = process.env.OPENROUTER_VISION_MODEL ? [process.env.OPENROUTER_VISION_MODEL] : VISION_MODELS
-  let lastError = 'request failed'
+  const timeoutMs = Math.min(PER_REQUEST_MS, remaining)
+  const attempts = await Promise.allSettled(
+    models.map(model => callVisionModel(model, apiKey, messages, timeoutMs))
+  )
 
-  for (const model of models) {
-    const remaining = deadline - Date.now()
-    if (remaining <= 1000) { lastError = 'time budget exhausted'; break }
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), Math.min(PER_REQUEST_MS, remaining))
-    try {
-      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://my-chhota-school.vercel.app',
-          'X-Title': 'My Chhota School - Image OCR',
-        },
-        body: JSON.stringify({ model, temperature: 0, messages }),
-        signal: controller.signal,
-      })
-      clearTimeout(timeout)
+  const results: ModelAttempt[] = attempts.map(a =>
+    a.status === 'fulfilled' ? a.value : { error: a.reason?.message || 'request failed' }
+  )
+  const winner = results.find(r => r.text)
+  if (winner?.text) return { text: winner.text }
 
-      if (res.ok) {
-        const data = await res.json()
-        const text: string = (data?.choices?.[0]?.message?.content ?? '').trim()
-        if (text && !looksLikeJunkOcr(text)) return { text }
-        lastError = text ? `non-OCR response ("${text.slice(0, 30)}")` : 'empty response'
-        continue // try the next model
-      }
-      if (res.status === 401) return { error: `"${filename}": AI key rejected (401). Check OPENROUTER_API_KEY.` }
-      const detail = await res.text().catch(() => '')
-      lastError = `(${res.status}) ${detail.slice(0, 140)}`
-      if (res.status === 404 || res.status === 429) continue
-      return { error: `"${filename}": image read failed ${lastError}` }
-    } catch (err: any) {
-      clearTimeout(timeout)
-      lastError = err.name === 'AbortError' ? 'timed out' : err.message
-      continue
-    }
-  }
+  const authRejected = results.find(r => r.authRejected)
+  if (authRejected) return { error: `"${filename}": AI key rejected (401). Check OPENROUTER_API_KEY.` }
 
+  const lastError = results.map(r => r.error).filter(Boolean).join('; ') || 'request failed'
   return { error: `"${filename}": could not read the image (${lastError}). The free AI vision service may be busy — try again in a minute, upload fewer images, or type the chapter into the "Generate with AI" tab instead.` }
 }
 
 export async function extractTextFromFile(
   formData: FormData
-): Promise<{ text?: string; error?: string }> {
+): Promise<{ text?: string; error?: string; chapters?: ChapterSegment[] }> {
   const files = formData.getAll('file') as File[]
   const valid = files.filter(f => f && f.name)
   if (!valid.length) return { error: 'No files provided.' }
@@ -228,7 +266,11 @@ export async function extractTextFromFile(
   const errors = results.filter(r => r?.error).map(r => r!.error!)
 
   if (!parts.length) return { error: errors.join(' | ') || 'No text could be extracted.' }
+
+  const combined = parts.join('\n\n')
+  const chapters = detectChapters(combined)
+
   // Some succeeded, some failed — return what we got but note the failures.
-  if (errors.length) return { text: parts.join('\n\n'), error: `Some files could not be read: ${errors.length}` }
-  return { text: parts.join('\n\n') }
+  if (errors.length) return { text: combined, chapters, error: `Some files could not be read: ${errors.length}` }
+  return { text: combined, chapters }
 }
